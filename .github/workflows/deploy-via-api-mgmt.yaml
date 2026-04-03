@@ -30,9 +30,9 @@ jobs:
       contents: read
 
     env:
-      # Image: {registry_url}/{repo_name}/{container_name}:{sha}
-      # Same format as container-instance-deploy-actions
-      IMAGE_TAG: ${{ secrets.DEPLOY_REGISTRY_URL }}/${{ github.event.repository.name }}/${{ secrets.DEPLOY_CONTAINER_NAME }}:${{ github.sha }}
+      # Image: {registry_url}/{repository}:{sha}
+      # DEPLOY_REGISTRY_REPO should match the repository path in your Tower registry (e.g. my-org/my-app)
+      IMAGE_TAG: ${{ secrets.DEPLOY_REGISTRY_URL }}/${{ secrets.DEPLOY_REGISTRY_REPO }}:${{ github.sha }}
 
     steps:
       - name: Checkout
