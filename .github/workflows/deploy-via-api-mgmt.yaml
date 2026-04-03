@@ -1,11 +1,4 @@
-# Deploy container image to Tower Cloud via API gateway.
-# Build + push to Tower Container Registry, then update container instance.
 #
-# Required repo Variable: DEPLOY_GATEWAY_URL (e.g. https://api.dev.tower.cloud)
-# Required Secrets: DEPLOY_ORG_ID, DEPLOY_IAM_USERNAME, DEPLOY_IAM_PASSWORD,
-#                   DEPLOY_CONTAINER_NAME, DEPLOY_REGISTRY_URL,
-#                   DEPLOY_REGISTRY_USERNAME, DEPLOY_REGISTRY_PASSWORD
-
 name: Deploy to Tower Cloud
 
 on:
@@ -66,4 +59,3 @@ jobs:
           image: ${{ env.IMAGE_TAG }}
           registry-username: ${{ secrets.DEPLOY_REGISTRY_USERNAME }}
           registry-password: ${{ secrets.DEPLOY_REGISTRY_PASSWORD }}
-          rollout-timeout-seconds: ${{ inputs.rollout_timeout_seconds || '600' }}
