@@ -82,7 +82,8 @@ jobs:
               missing=1
             fi
           done
-          if [ "${{ inputs.build_image }}" != "true" ] && [ -z "${{ inputs.image_uri }}" ]; then
+          BUILD_IMAGE="${{ inputs.build_image }}"
+          if [ "$BUILD_IMAGE" = "false" ] && [ -z "${{ inputs.image_uri }}" ]; then
             echo "::error::When build_image is false, input image_uri is required"
             missing=1
           fi
@@ -117,7 +118,7 @@ jobs:
           fi
 
       - name: Deploy container
-        uses: ./workflow-service
+        uses: vinayteja-31/worflow-service@main
         with:
           gateway-url: ${{ vars.DEPLOY_GATEWAY_URL }}
           org-id: ${{ secrets.DEPLOY_ORG_ID }}
