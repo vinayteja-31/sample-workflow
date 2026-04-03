@@ -1,10 +1,10 @@
 # Deploy container image to Tower Cloud via API gateway.
-# Build + push to GHCR, then update container instance.
+# Build + push to Tower Container Registry, then update container instance.
 #
 # Required repo Variable: DEPLOY_GATEWAY_URL (e.g. https://api.dev.tower.cloud)
 # Required Secrets: DEPLOY_ORG_ID, DEPLOY_IAM_USERNAME, DEPLOY_IAM_PASSWORD,
-#                   DEPLOY_CONTAINER_NAME, DEPLOY_SERVICE_NAME
-# Optional Secrets: DEPLOY_REGISTRY_USERNAME, DEPLOY_REGISTRY_PASSWORD
+#                   DEPLOY_CONTAINER_NAME, DEPLOY_REGISTRY_URL,
+#                   DEPLOY_REGISTRY_USERNAME, DEPLOY_REGISTRY_PASSWORD
 
 name: Deploy to Tower Cloud
 
@@ -13,16 +13,6 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      build_image:
-        description: Build and push image to ghcr.io before deploy
-        required: false
-        default: true
-        type: boolean
-      image_uri:
-        description: Full image URI when build_image is false
-        required: false
-        default: ''
-        type: string
       rollout_timeout_seconds:
         required: false
         default: '600'
@@ -38,39 +28,32 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+
+    env:
+      # Image: {registry_url}/{repo_name}/{container_name}:{sha}
+      # Same format as container-instance-deploy-actions
+      IMAGE_TAG: ${{ secrets.DEPLOY_REGISTRY_URL }}/${{ github.event.repository.name }}/${{ secrets.DEPLOY_CONTAINER_NAME }}:${{ github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        if: inputs.build_image != false
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
-        if: inputs.build_image != false
+      - name: Log in to Tower Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ secrets.DEPLOY_REGISTRY_URL }}
+          username: ${{ secrets.DEPLOY_REGISTRY_USERNAME }}
+          password: ${{ secrets.DEPLOY_REGISTRY_PASSWORD }}
 
       - name: Build and push image
-        if: inputs.build_image != false
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
-
-      - name: Resolve image URI
-        id: image
-        run: |
-          if [ "${{ inputs.build_image }}" = "false" ] && [ -n "${{ inputs.image_uri }}" ]; then
-            echo "uri=${{ inputs.image_uri }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "uri=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          fi
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_TAG }}
 
       - name: Deploy to Tower Cloud
         uses: vinayteja-31/worflow-service@main
@@ -80,7 +63,7 @@ jobs:
           tower-password: ${{ secrets.DEPLOY_IAM_PASSWORD }}
           organization-id: ${{ secrets.DEPLOY_ORG_ID }}
           container-name: ${{ secrets.DEPLOY_CONTAINER_NAME }}
-          image: ${{ steps.image.outputs.uri }}
+          image: ${{ env.IMAGE_TAG }}
           registry-username: ${{ secrets.DEPLOY_REGISTRY_USERNAME }}
           registry-password: ${{ secrets.DEPLOY_REGISTRY_PASSWORD }}
           rollout-timeout-seconds: ${{ inputs.rollout_timeout_seconds || '600' }}
