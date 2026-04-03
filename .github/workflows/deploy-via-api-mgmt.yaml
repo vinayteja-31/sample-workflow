@@ -1,19 +1,32 @@
-# Same contract as support-service-api-mgmt: curl-refs/deployment-workflow-curl-reference.txt
-# Build + push to GHCR, then POST /api/deployments/execute and poll status.
+# Deploy container image via the deployment gateway.
+# Build + push to GHCR (optional), then call the container-deploy action.
 #
-# Required repo Variable: DEPLOY_GATEWAY_URL
+# Required repo Variable: DEPLOY_GATEWAY_URL (provided by platform)
 # Required Secrets: DEPLOY_ORG_ID, DEPLOY_IAM_USERNAME, DEPLOY_IAM_PASSWORD,
 #                   DEPLOY_SERVICE_NAME, DEPLOY_CONTAINER_NAME
+# Optional Secrets: DEPLOY_REGISTRY_USERNAME, DEPLOY_REGISTRY_PASSWORD (for tower/private registries)
 
 name: Deploy via API Gateway
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       environment:
-        description: Deployment environment label (JSON field environment)
+        description: Deployment environment label
         required: false
         default: dev
+        type: string
+      build_image:
+        description: Build and push image to ghcr.io before deploy
+        required: false
+        default: true
+        type: boolean
+      image_uri:
+        description: Full image URI when build_image is false
+        required: false
+        default: ''
         type: string
       registry_profile:
         description: auto (ghcr), tower, external-private
@@ -24,21 +37,6 @@ on:
           - auto
           - tower
           - external-private
-      build_image:
-        description: Build and push image to ghcr.io before calling deploy API
-        required: false
-        default: true
-        type: boolean
-      image_uri:
-        description: Full image URI when build_image is false
-        required: false
-        default: ''
-        type: string
-      registry_host:
-        description: For profile auto — registry.registryHost
-        required: false
-        default: ghcr.io
-        type: string
       tower_registry_name:
         description: For profile tower
         required: false
@@ -55,19 +53,11 @@ concurrency:
 
 jobs:
   deploy:
-    name: Build → deploy API → poll
+    name: Build and Deploy
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-
-    env:
-      GATEWAY_URL: ${{ vars.DEPLOY_GATEWAY_URL }}
-      ORG_ID: ${{ secrets.DEPLOY_ORG_ID }}
-      IAM_USERNAME: ${{ secrets.DEPLOY_IAM_USERNAME }}
-      IAM_PASSWORD: ${{ secrets.DEPLOY_IAM_PASSWORD }}
-      SERVICE_NAME: ${{ secrets.DEPLOY_SERVICE_NAME }}
-      CONTAINER_NAME: ${{ secrets.DEPLOY_CONTAINER_NAME }}
 
     steps:
       - name: Checkout
@@ -77,8 +67,16 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for v in GATEWAY_URL ORG_ID IAM_USERNAME IAM_PASSWORD SERVICE_NAME CONTAINER_NAME; do
-            eval "val=\${$v:-}"
+          for v in DEPLOY_GATEWAY_URL DEPLOY_ORG_ID DEPLOY_IAM_USERNAME DEPLOY_IAM_PASSWORD DEPLOY_SERVICE_NAME DEPLOY_CONTAINER_NAME; do
+            val=""
+            case "$v" in
+              DEPLOY_GATEWAY_URL) val="${{ vars.DEPLOY_GATEWAY_URL }}" ;;
+              DEPLOY_ORG_ID) val="${{ secrets.DEPLOY_ORG_ID }}" ;;
+              DEPLOY_IAM_USERNAME) val="${{ secrets.DEPLOY_IAM_USERNAME }}" ;;
+              DEPLOY_IAM_PASSWORD) val="${{ secrets.DEPLOY_IAM_PASSWORD }}" ;;
+              DEPLOY_SERVICE_NAME) val="${{ secrets.DEPLOY_SERVICE_NAME }}" ;;
+              DEPLOY_CONTAINER_NAME) val="${{ secrets.DEPLOY_CONTAINER_NAME }}" ;;
+            esac
             if [ -z "$val" ]; then
               echo "::error::Missing required $v (set vars/secrets in this repo)"
               missing=1
@@ -91,11 +89,11 @@ jobs:
           exit "$missing"
 
       - name: Set up Docker Buildx
-        if: inputs.build_image == true
+        if: inputs.build_image == true || github.event_name == 'push'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
-        if: inputs.build_image == true
+        if: inputs.build_image == true || github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -103,195 +101,35 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        if: inputs.build_image == true
-        env:
-          IMAGE_REF: ghcr.io/${{ github.repository }}:${{ github.sha }}
+        if: inputs.build_image == true || github.event_name == 'push'
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Resolve image URI
+        id: image
         run: |
-          set -euo pipefail
-          echo "IMAGE_URI=${IMAGE_REF,,}" >> "$GITHUB_ENV"
-          docker buildx build \
-            --push \
-            --tag "${IMAGE_REF,,}" \
-            -f Dockerfile .
-
-      - name: Use provided image URI
-        if: inputs.build_image != true
-        run: |
-          echo "IMAGE_URI=${{ inputs.image_uri }}" >> "$GITHUB_ENV"
-
-      - name: Execute deployment (POST /api/deployments/execute)
-        id: execute
-        env:
-          PROFILE: ${{ inputs.registry_profile }}
-          ENV_NAME: ${{ inputs.environment }}
-          REG_HOST: ${{ inputs.registry_host }}
-          TOWER_REG: ${{ inputs.tower_registry_name }}
-          TOWER_REGISTRY_FALLBACK: ${{ vars.DEPLOY_TOWER_REGISTRY_NAME }}
-          TOUT: ${{ inputs.rollout_timeout_seconds }}
-          REG_USER: ${{ secrets.DEPLOY_REGISTRY_USERNAME }}
-          REG_PASS: ${{ secrets.DEPLOY_REGISTRY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          REQ_ID="ci-run-${{ github.run_id }}-${{ github.run_attempt }}"
-          GATEWAY_URL="${GATEWAY_URL%/}"
-
-          case "$PROFILE" in
-            auto)
-              REG_JSON=$(jq -nc --arg h "$REG_HOST" '{registryHost: $h}')
-              BODY=$(jq -nc \
-                --arg org "$ORG_ID" \
-                --arg env "$ENV_NAME" \
-                --arg svc "$SERVICE_NAME" \
-                --arg ctn "$CONTAINER_NAME" \
-                --arg img "$IMAGE_URI" \
-                --arg rid "$REQ_ID" \
-                --arg u "$IAM_USERNAME" \
-                --arg p "$IAM_PASSWORD" \
-                --argjson reg "$REG_JSON" \
-                --arg tout "$TOUT" \
-                '{
-                  orgId: $org,
-                  environment: $env,
-                  serviceName: $svc,
-                  containerName: $ctn,
-                  image: $img,
-                  requestId: $rid,
-                  auth: {username: $u, password: $p},
-                  registryMode: "auto",
-                  registry: $reg,
-                  rollout: {timeoutSeconds: ($tout | tonumber)}
-                }')
-              ;;
-            tower)
-              TOWER="${TOWER_REG:-$TOWER_REGISTRY_FALLBACK}"
-              if [ -z "$TOWER" ]; then
-                echo "::error::tower profile requires tower_registry_name or DEPLOY_TOWER_REGISTRY_NAME"
-                exit 1
-              fi
-              REG_JSON=$(jq -nc --arg t "$TOWER" '{towerRegistryName: $t}')
-              BODY=$(jq -nc \
-                --arg org "$ORG_ID" \
-                --arg env "$ENV_NAME" \
-                --arg svc "$SERVICE_NAME" \
-                --arg ctn "$CONTAINER_NAME" \
-                --arg img "$IMAGE_URI" \
-                --arg u "$IAM_USERNAME" \
-                --arg p "$IAM_PASSWORD" \
-                --argjson reg "$REG_JSON" \
-                '{
-                  orgId: $org,
-                  environment: $env,
-                  serviceName: $svc,
-                  containerName: $ctn,
-                  image: $img,
-                  auth: {username: $u, password: $p},
-                  registryMode: "auto",
-                  registry: $reg
-                }')
-              ;;
-            external-private)
-              if [ -z "$REG_USER" ] || [ -z "$REG_PASS" ]; then
-                echo "::error::external-private requires DEPLOY_REGISTRY_USERNAME and DEPLOY_REGISTRY_PASSWORD"
-                exit 1
-              fi
-              REG_JSON=$(jq -nc \
-                --arg h "$REG_HOST" \
-                --arg ru "$REG_USER" \
-                --arg rp "$REG_PASS" \
-                '{registryHost: $h, username: $ru, password: $rp}')
-              BODY=$(jq -nc \
-                --arg org "$ORG_ID" \
-                --arg env "$ENV_NAME" \
-                --arg svc "$SERVICE_NAME" \
-                --arg ctn "$CONTAINER_NAME" \
-                --arg img "$IMAGE_URI" \
-                --arg u "$IAM_USERNAME" \
-                --arg p "$IAM_PASSWORD" \
-                --argjson reg "$REG_JSON" \
-                '{
-                  orgId: $org,
-                  environment: $env,
-                  serviceName: $svc,
-                  containerName: $ctn,
-                  image: $img,
-                  auth: {username: $u, password: $p},
-                  registryMode: "auto",
-                  registry: $reg
-                }')
-              ;;
-            *)
-              echo "::error::Unknown registry_profile"
-              exit 1
-              ;;
-          esac
-
-          echo "Request body:"
-          echo "$BODY" | jq .
-
-          RESP=$(curl -sS -w "\n%{http_code}" -X POST \
-            -H "Content-Type: application/json" \
-            -d "$BODY" \
-            "$GATEWAY_URL/api/deployments/execute")
-          HTTP_CODE=$(echo "$RESP" | tail -n1)
-          JSON_BODY=$(echo "$RESP" | sed '$d')
-          echo "$JSON_BODY" | jq . || echo "$JSON_BODY"
-
-          if [ "$HTTP_CODE" != "202" ] && [ "$HTTP_CODE" != "200" ]; then
-            echo "::error::Deploy API returned HTTP $HTTP_CODE"
-            exit 1
+          if [ "${{ inputs.build_image }}" == "false" ] && [ -n "${{ inputs.image_uri }}" ]; then
+            echo "uri=${{ inputs.image_uri }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "uri=ghcr.io/${{ github.repository }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
 
-          SUCCESS=$(echo "$JSON_BODY" | jq -r '.success // false')
-          if [ "$SUCCESS" != "true" ]; then
-            echo "::error::Deploy API returned success=false"
-            exit 1
-          fi
-
-          DEPLOYMENT_ID=$(echo "$JSON_BODY" | jq -r '.data.deploymentId // empty')
-          if [ -z "$DEPLOYMENT_ID" ]; then
-            echo "::error::Missing data.deploymentId in response"
-            exit 1
-          fi
-          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
-          echo "DEPLOYMENT_ID=$DEPLOYMENT_ID" >> "$GITHUB_ENV"
-
-      - name: Poll deployment status
-        env:
-          MAX_WAIT_SEC: ${{ inputs.rollout_timeout_seconds }}
-        run: |
-          set -euo pipefail
-          GATEWAY_URL="${GATEWAY_URL%/}"
-          DEPLOYMENT_ID="${DEPLOYMENT_ID:?}"
-          INTERVAL=5
-          ELAPSED=0
-          MAX_WAIT_SEC="${MAX_WAIT_SEC:-600}"
-
-          while [ "$ELAPSED" -lt "$MAX_WAIT_SEC" ]; do
-            RESP=$(curl -sS -w "\n%{http_code}" "$GATEWAY_URL/api/deployments/$DEPLOYMENT_ID")
-            HTTP_CODE=$(echo "$RESP" | tail -n1)
-            JSON_BODY=$(echo "$RESP" | sed '$d')
-            if [ "$HTTP_CODE" != "200" ]; then
-              echo "::warning::Status HTTP $HTTP_CODE"
-              sleep "$INTERVAL"
-              ELAPSED=$((ELAPSED + INTERVAL))
-              continue
-            fi
-            STATUS=$(echo "$JSON_BODY" | jq -r '.data.status // empty')
-            echo "deployment status: $STATUS"
-            case "$STATUS" in
-              succeeded)
-                echo "$JSON_BODY" | jq .
-                exit 0
-                ;;
-              failed)
-                echo "$JSON_BODY" | jq .
-                echo "::error::Deployment failed"
-                exit 1
-                ;;
-            esac
-            sleep "$INTERVAL"
-            ELAPSED=$((ELAPSED + INTERVAL))
-          done
-
-          echo "::error::Timed out waiting for terminal deployment status (${MAX_WAIT_SEC}s)"
-          exit 1
+      - name: Deploy container
+        uses: ./workflow-service
+        with:
+          gateway-url: ${{ vars.DEPLOY_GATEWAY_URL }}
+          org-id: ${{ secrets.DEPLOY_ORG_ID }}
+          iam-username: ${{ secrets.DEPLOY_IAM_USERNAME }}
+          iam-password: ${{ secrets.DEPLOY_IAM_PASSWORD }}
+          service-name: ${{ secrets.DEPLOY_SERVICE_NAME }}
+          container-name: ${{ secrets.DEPLOY_CONTAINER_NAME }}
+          image: ${{ steps.image.outputs.uri }}
+          environment: ${{ inputs.environment || 'dev' }}
+          registry-mode: ${{ inputs.registry_profile || 'auto' }}
+          registry-host: ghcr.io
+          tower-registry-name: ${{ inputs.tower_registry_name }}
+          registry-username: ${{ secrets.DEPLOY_REGISTRY_USERNAME }}
+          registry-password: ${{ secrets.DEPLOY_REGISTRY_PASSWORD }}
+          rollout-timeout-seconds: ${{ inputs.rollout_timeout_seconds || '600' }}
