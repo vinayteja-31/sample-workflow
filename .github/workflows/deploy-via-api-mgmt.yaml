@@ -5,11 +5,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      rollout_timeout_seconds:
-        required: false
-        default: '600'
-        type: string
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -23,9 +18,9 @@ jobs:
       contents: read
 
     env:
-      # Image: {registry_url}/{repository}:{sha}
-      # DEPLOY_REGISTRY_REPO should match the repository path in your Tower registry (e.g. my-org/my-app)
-      IMAGE_TAG: ${{ secrets.DEPLOY_REGISTRY_URL }}/${{ secrets.DEPLOY_REGISTRY_REPO }}:${{ github.sha }}
+      # Auto-generate image tag: {registry}/{repo_name}/{container_name}:{sha}
+      # If DEPLOY_REGISTRY_REPO is set, uses that instead of auto-generated path
+      IMAGE_TAG: ${{ secrets.DEPLOY_REGISTRY_URL }}/${{ secrets.DEPLOY_REGISTRY_REPO || format('{0}/{1}', github.event.repository.name, secrets.DEPLOY_CONTAINER_NAME) }}:${{ github.sha }}
 
     steps:
       - name: Checkout
