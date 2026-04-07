@@ -1,0 +1,20 @@
+name: Deploy to Tower Cloud                                                              
+  on:                                                                                      
+    push:                                                                                  
+      branches: [main]                                                                     
+    workflow_dispatch:
+
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+                                              
+        - name: Build and deploy          
+          uses: tower-cloud/container-instance-deploy-actions@feat/improvements
+          with:                                                                            
+            tower_user: ${{ secrets.DEPLOY_IAM_USERNAME }}
+            tower_password: ${{ secrets.DEPLOY_IAM_PASSWORD }}                             
+            organization_id: ${{ vars.DEPLOY_ORG_ID }}
+            container_name: ${{ vars.DEPLOY_CONTAINER_NAME }}
+            registry_url: ${{ vars.DEPLOY_REGISTRY_URL }}
