@@ -14,5 +14,5 @@ jobs:
           tower_user: ${{ secrets.DEPLOY_IAM_USERNAME }}
           tower_password: ${{ secrets.DEPLOY_IAM_PASSWORD }}
           organization_id: ${{ vars.DEPLOY_ORG_ID }}
-          container_name: my-container
+          container_name: test-go
           tcr_name: ${{ vars.DEPLOY_TCR_NAME }}
