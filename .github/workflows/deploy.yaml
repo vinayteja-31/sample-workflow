@@ -16,3 +16,6 @@ jobs:
           organization_id: ${{ vars.DEPLOY_ORG_ID }}
           container_name: ${{ vars.DEPLOY_CONTAINER_NAME }}
           registry_url: ${{ vars.DEPLOY_REGISTRY_URL }}
+          # Private registry credentials are required
+          registry_username: ${{ secrets.DEPLOY_REGISTRY_USERNAME }}
+          registry_password: ${{ secrets.DEPLOY_REGISTRY_PASSWORD }}
