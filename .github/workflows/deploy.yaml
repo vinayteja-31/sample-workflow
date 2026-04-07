@@ -14,8 +14,5 @@ jobs:
           tower_user: ${{ secrets.DEPLOY_IAM_USERNAME }}
           tower_password: ${{ secrets.DEPLOY_IAM_PASSWORD }}
           organization_id: ${{ vars.DEPLOY_ORG_ID }}
-          container_name: ${{ vars.DEPLOY_CONTAINER_NAME }}
-          registry_url: ${{ vars.DEPLOY_REGISTRY_URL }}
-          # Private registry credentials are required
-          registry_username: ${{ secrets.DEPLOY_REGISTRY_USERNAME }}
-          registry_password: ${{ secrets.DEPLOY_REGISTRY_PASSWORD }}
+          container_name: my-container
+          tcr_name: ${{ vars.DEPLOY_TCR_NAME }}
