@@ -14,5 +14,5 @@ jobs:
           tower_user: ${{ secrets.TOWER_USER }}
           tower_password: ${{ secrets.TOWER_PASSWORD }}
           organization_id: ${{ vars.TOWER_ORG_ID }}
-          container_name: public-app
+          container_name: app-test
           tcr_name: ${{ vars.TCR_NAME }}
