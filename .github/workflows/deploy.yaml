@@ -11,8 +11,8 @@ jobs:
       - name: Build and deploy
         uses: tower-cloud/container-instance-deploy-actions@feat/improvements
         with:
-          tower_user: ${{ secrets.DEPLOY_IAM_USERNAME }}
-          tower_password: ${{ secrets.DEPLOY_IAM_PASSWORD }}
-          organization_id: ${{ vars.DEPLOY_ORG_ID }}
+          tower_user: ${{ secrets.TOWER_USER }}
+          tower_password: ${{ secrets.TOWER_PASSWORD }}
+          organization_id: ${{ vars.TOWER_ORG_ID }}
           container_name: public-app
-          tcr_name: ${{ vars.DEPLOY_TCR_NAME }}
+          tcr_name: ${{ vars.TCR_NAME }}
