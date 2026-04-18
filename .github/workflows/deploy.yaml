@@ -2,17 +2,18 @@ name: Deploy to Tower Cloud
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Build and deploy
-        uses: tower-cloud/container-instance-deploy-actions@feat/improvements
+        uses: tower-cloud/container-instance-deploy-actions@main
         with:
           tower_user: ${{ secrets.TOWER_USER }}
           tower_password: ${{ secrets.TOWER_PASSWORD }}
-          organization_id: ${{ vars.TOWER_ORG_ID }}
-          container_name: app-test
-          tcr_name: ${{ vars.TCR_NAME }}
+          organization_id: ${{ secrets.TOWER_ORG_ID }}
+          container_name: my-apk-workflow
+          tcr_name: ${{ secrets.TCR_NAME }}
